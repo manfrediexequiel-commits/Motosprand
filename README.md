@@ -1,40 +1,49 @@
 # 🏍️ Motos Prand - Sistema de Gestión de Taller
 
-Sistema de gestión para taller mecánico de motos con control de inventario, órdenes de trabajo y reportes de ganancias.
+Sistema completo de gestión para taller mecánico de motos, con control de inventario, órdenes de trabajo, reportes de ganancias y gestión de usuarios.
 
 ## 🚀 Demo en Vivo
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](TU_URL_DE_STREAMLIT_CLOUD)
+**Railway:** [https://motosprand.com](https://motosprand.com) *(o tu URL de Railway)*
 
-## 📋 Características
+## ✨ Características
 
-- 🔐 **Sistema de Login** con roles (Admin/Técnico)
+- 🔐 **Sistema de Login** con roles (Administrador/Técnico)
 - 📦 **Gestión de Inventario** con alertas de stock crítico
-- 📝 **Órdenes de Trabajo** con numeración automática
+- 📝 **Órdenes de Trabajo** con numeración automática (MP-XXXXXX-XX)
 - 💰 **Reportes de Ganancias** (solo administradores)
-- 👥 **Gestión de Usuarios** (crear nuevos usuarios)
-- 💾 **Base de datos SQLite** local
+- 👥 **Gestión de Usuarios** (crear/editar usuarios)
+- 🗄️ **Base de datos PostgreSQL** (persistente en Railway)
+- 📱 **Interfaz responsive** con Streamlit
 
 ## 🔑 Usuarios Predefinidos
 
-| Usuario | Contraseña | Rol | Permisos |
-|---------|-----------|-----|----------|
+| Usuario | Contraseña | Rol | Acceso |
+|---------|-----------|-----|--------|
 | **rodri** | 1590 | 🟠 Admin | Total |
 | **lean** | 3588 | 🟠 Admin | Total |
 | **tecnico** | 9911 | 🔵 Técnico | Limitado |
 | **tecnico1** | 8822 | 🔵 Técnico | Limitado |
 
-## 🛠️ Instalación Local
+> **Nota:** Los técnicos no pueden ver ganancias ni crear usuarios.
+
+## 🛠️ Tecnologías
+
+- **Frontend:** Streamlit
+- **Backend:** Python 3.9
+- **Base de datos:** PostgreSQL (Railway) / SQLite (local)
+- **Seguridad:** bcrypt para hashing de contraseñas
+- **Deploy:** Railway.app
+
+## 📋 Instalación Local
 
 ### Requisitos
 - Python 3.9+
+- Git
 
 ### Pasos
-git add .
-git commit -m "Fix build errors"
-git push origin main
 
-1. **Clonar el repositorio**
+1. **Clonar repositorio**
 ```bash
 git clone https://github.com/TU_USUARIO/motos-prand.git
 cd motos-prand
