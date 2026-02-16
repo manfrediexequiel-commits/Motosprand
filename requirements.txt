@@ -1,3 +1,36 @@
-streamlit
-pandas
-plotly
+# Motos Prand - Sistema de Gestión de Taller
+# Requerimientos de Python
+
+# Framework principal
+streamlit>=1.28.0
+
+# Manejo de datos
+pandas>=2.0.0
+openpyxl>=3.1.0
+
+# Seguridad - Hashing de contraseñas
+bcrypt>=4.0.0
+
+# Base de datos (incluida en stdlib, pero listeda por claridad)
+# sqlite3 - incluida en Python estándar
+
+# Utilidades de fecha/hora
+# datetime - incluida en Python estándar
+
+# Generación de números aleatorios seguros
+# secrets - incluida en Python estándar
+
+# Manejo de archivos y paths
+# pathlib - incluida en Python estándar
+
+# Concurrencia y threading
+# threading, time - incluidas en Python estándar
+
+# Context managers
+# contextlib - incluida en Python estándar
+
+# Data classes
+# dataclasses - incluida en Python 3.7+
+
+# Tipado
+# typing - incluida en Python estándar
