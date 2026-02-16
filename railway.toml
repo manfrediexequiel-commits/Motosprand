@@ -1,9 +1,6 @@
- [build]
+[build]
 builder = "nixpacks"
-buildCommand = "pip install --upgrade pip setuptools wheel && pip install -r requirements.txt"
 
 [deploy]
-startCommand = "streamlit run motos_prand.py --server.port $PORT --server.address 0.0.0.0 --server.headless true"
+startCommand = "streamlit run motos_prand.py --server.port ${PORT:-8080} --server.address 0.0.0.0 --server.headless true"
 restartPolicyType = "on_failure"
-healthcheckPath = "/_stcore/health"
-healthcheckTimeout = 100
