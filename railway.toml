@@ -1,6 +1,7 @@
 [build]
-builder = "DOCKERFILE"
+builder = "dockerfile"
 
 [deploy]
-startCommand = "streamlit run motos_prand.py --server.port ${PORT} --server.address 0.0.0.0 --server.headless true"
 restartPolicyType = "on_failure"
+healthcheckPath = "/_stcore/health"
+healthcheckTimeout = 100
