@@ -15,52 +15,52 @@ from pathlib import Path
 import threading
 import time
 import schedule
-import bcrypt
+import bcrypt  # NUEVO: pip install bcrypt
 from io import BytesIO
 import base64
 
 # =============================================================================
-# CONFIGURACIÓN INICIAL - MOTOS PRAND
+# CONFIGURACIÓN INICIAL MEJORADA
 # =============================================================================
 
 st.set_page_config(
-    page_title="Motos Prand - Gestión de Taller",
-    page_icon="🏍️",
+    page_title="SAT Pro Enterprise - Gestión de Taller",
+    page_icon="🔧",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 @dataclass
 class Config:
-    DB_PATH: str = 'motos_prand.db'
+    DB_PATH: str = 'gestion_taller_enterprise.db'
     BACKUP_DIR: str = './backups'
-    SESSION_TIMEOUT: int = 480
+    SESSION_TIMEOUT: int = 480  # minutos
     MAX_LOGIN_ATTEMPTS: int = 3
-    LOCKOUT_TIME: int = 15
+    LOCKOUT_TIME: int = 15  # minutos
 
 config = Config()
 Path(config.BACKUP_DIR).mkdir(exist_ok=True)
 
-# CSS Personalizado Motos Prand
+# CSS Industrial Mejorado
 st.markdown("""
 <style>
     .main-header { 
-        color: #ff6b00; 
+        color: #1a73e8; 
         font-size: 2.2rem; 
         font-weight: 700; 
         margin-bottom: 1rem;
-        border-bottom: 3px solid #ff6b00;
+        border-bottom: 3px solid #1a73e8;
         padding-bottom: 0.5rem;
     }
     .stMetric { 
-        background: linear-gradient(135deg, #fff5eb 0%, #ffe4cc 100%); 
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); 
         padding: 20px; 
         border-radius: 12px; 
-        border: 1px solid #ffcc99;
-        box-shadow: 0 2px 4px rgba(255,107,0,0.1);
+        border: 1px solid #dee2e6;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
     [data-testid="stSidebar"] { 
-        background-color: #1a1a2e; 
+        background-color: #1e293b; 
     }
     [data-testid="stSidebar"] .stRadio label {
         color: white !important;
@@ -71,27 +71,13 @@ st.markdown("""
         padding: 2rem;
         background: white;
         border-radius: 16px;
-        box-shadow: 0 10px 25px rgba(255,107,0,0.2);
-    }
-    .admin-badge {
-        background: #ff6b00;
-        color: white;
-        padding: 2px 8px;
-        border-radius: 12px;
-        font-size: 0.8em;
-    }
-    .tecnico-badge {
-        background: #4ecdc4;
-        color: white;
-        padding: 2px 8px;
-        border-radius: 12px;
-        font-size: 0.8em;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.1);
     }
 </style>
 """, unsafe_allow_html=True)
 
 # =============================================================================
-# BASE DE DATOS
+# BASE DE DATOS MEJORADA (Seguridad + Concurrencia)
 # =============================================================================
 
 class DatabaseManager:
@@ -101,16 +87,17 @@ class DatabaseManager:
         self._setup_backup_schedule()
     
     def get_connection(self):
+        """Thread-safe connection con timeout para concurrencia"""
         if not hasattr(self._local, 'conn') or self._local.conn is None:
             self._local.conn = sqlite3.connect(
                 config.DB_PATH, 
                 check_same_thread=False,
-                timeout=20.0,
-                isolation_level=None
+                timeout=20.0,  # Espera 20s si está lockeada
+                isolation_level=None  # Autocommit mode para evitar locks largos
             )
             self._local.conn.row_factory = sqlite3.Row
             self._local.conn.execute("PRAGMA foreign_keys = ON")
-            self._local.conn.execute("PRAGMA journal_mode = WAL")
+            self._local.conn.execute("PRAGMA journal_mode = WAL")  # Mejor concurrencia
         return self._local.conn
 
     @contextmanager
@@ -118,12 +105,12 @@ class DatabaseManager:
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
-            cursor.execute("BEGIN IMMEDIATE")
+            cursor.execute("BEGIN IMMEDIATE")  # Lockeo inmediato
             yield cursor
             conn.commit()
         except sqlite3.OperationalError as e:
             conn.rollback()
-            st.error(f"Error de base de datos: {e}")
+            st.error(f"Error de base de datos (posible concurrencia): {e}")
             raise
         except Exception as e:
             conn.rollback()
@@ -139,12 +126,10 @@ class DatabaseManager:
                     nombre TEXT NOT NULL, 
                     rol TEXT DEFAULT 'tecnico',
                     activo INTEGER DEFAULT 1,
-                    force_password_change INTEGER DEFAULT 0,
+                    force_password_change INTEGER DEFAULT 1,
                     last_login TIMESTAMP,
                     failed_attempts INTEGER DEFAULT 0,
-                    locked_until TIMESTAMP,
-                    created_by INTEGER,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    locked_until TIMESTAMP
                 );
                 
                 CREATE TABLE IF NOT EXISTS clientes (
@@ -191,7 +176,6 @@ class DatabaseManager:
                     estado TEXT DEFAULT 'Recibido',
                     prioridad TEXT DEFAULT 'Normal',
                     total REAL DEFAULT 0,
-                    costo_repuestos REAL DEFAULT 0,
                     fecha_ingreso TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     fecha_estimada DATE,
                     fecha_entrega TIMESTAMP,
@@ -205,7 +189,7 @@ class DatabaseManager:
                 CREATE TABLE IF NOT EXISTS movimientos_inventario (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     item_id INTEGER,
-                    tipo TEXT,
+                    tipo TEXT,  -- 'entrada', 'salida', 'ajuste'
                     cantidad INTEGER,
                     orden_id INTEGER,
                     usuario_id INTEGER,
@@ -219,24 +203,19 @@ class DatabaseManager:
                 CREATE INDEX IF NOT EXISTS idx_vehiculos_patente ON vehiculos(patente);
             """)
             
-            # Crear usuarios iniciales si no existen
-            self._crear_usuario_inicial(cur, 'rodri', '1590', 'Rodri', 'admin')
-            self._crear_usuario_inicial(cur, 'lean', '3588', 'Lean', 'admin')
-            self._crear_usuario_inicial(cur, 'tecnico', '9911', 'Técnico Principal', 'tecnico')
-            self._crear_usuario_inicial(cur, 'tecnico1', '8822', 'Técnico Auxiliar', 'tecnico')
-
-    def _crear_usuario_inicial(self, cur, username, password, nombre, rol):
-        """Crea usuario inicial si no existe"""
-        cur.execute("SELECT id FROM usuarios WHERE username=?", (username,))
-        if not cur.fetchone():
-            hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12))
-            cur.execute("""
-                INSERT INTO usuarios 
-                (username, password_hash, nombre, rol, force_password_change) 
-                VALUES (?,?,?,?,?)
-            """, (username, hashed.decode(), nombre, rol, 0))
+            # Usuario Admin seguro (debe cambiar contraseña al entrar)
+            cur.execute("SELECT count(*) FROM usuarios WHERE username='admin'")
+            if cur.fetchone()[0] == 0:
+                # Generar hash seguro con bcrypt
+                hashed = bcrypt.hashpw(b"admin123", bcrypt.gensalt(rounds=12))
+                cur.execute("""
+                    INSERT INTO usuarios 
+                    (username, password_hash, nombre, rol, force_password_change) 
+                    VALUES (?,?,?,?,?)
+                """, ('admin', hashed.decode(), 'Administrador Master', 'admin', 1))
 
     def _setup_backup_schedule(self):
+        """Configura backup automático diario"""
         schedule.every().day.at("02:00").do(self._backup_db)
         def run_schedule():
             while True:
@@ -245,11 +224,13 @@ class DatabaseManager:
         threading.Thread(target=run_schedule, daemon=True).start()
     
     def _backup_db(self):
+        """Crea backup con timestamp"""
         try:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_path = Path(config.BACKUP_DIR) / f"motos_prand_backup_{timestamp}.db"
+            backup_path = Path(config.BACKUP_DIR) / f"backup_{timestamp}.db"
             shutil.copy(config.DB_PATH, backup_path)
-            backups = sorted(Path(config.BACKUP_DIR).glob("motos_prand_backup_*.db"))
+            # Mantener solo últimos 7 backups
+            backups = sorted(Path(config.BACKUP_DIR).glob("backup_*.db"))
             for old_backup in backups[:-7]:
                 old_backup.unlink()
         except Exception as e:
@@ -258,10 +239,11 @@ class DatabaseManager:
 db = DatabaseManager()
 
 # =============================================================================
-# SEGURIDAD
+# SEGURIDAD MEJORADA (bcrypt + Rate Limiting)
 # =============================================================================
 
 def check_password(username: str, password: str) -> Optional[Dict]:
+    """Autenticación segura con protección contra fuerza bruta"""
     with db.transaction() as cur:
         cur.execute("""
             SELECT id, password_hash, nombre, rol, force_password_change,
@@ -274,6 +256,7 @@ def check_password(username: str, password: str) -> Optional[Dict]:
         if not user:
             return None
         
+        # Verificar si está bloqueado
         if user['locked_until']:
             locked_until = datetime.fromisoformat(user['locked_until'])
             if datetime.now() < locked_until:
@@ -281,7 +264,9 @@ def check_password(username: str, password: str) -> Optional[Dict]:
                 st.error(f"Cuenta bloqueada. Intente en {mins_left} minutos.")
                 return None
         
+        # Verificar contraseña con bcrypt
         if bcrypt.checkpw(password.encode(), user['password_hash'].encode()):
+            # Resetear intentos fallidos
             cur.execute("""
                 UPDATE usuarios 
                 SET failed_attempts=0, locked_until=NULL, last_login=?
@@ -294,6 +279,7 @@ def check_password(username: str, password: str) -> Optional[Dict]:
                 "force_password_change": user['force_password_change']
             }
         else:
+            # Incrementar intentos fallidos
             new_attempts = user['failed_attempts'] + 1
             locked_until = None
             if new_attempts >= config.MAX_LOGIN_ATTEMPTS:
@@ -307,29 +293,10 @@ def check_password(username: str, password: str) -> Optional[Dict]:
             """, (new_attempts, locked_until, user['id']))
             return None
 
-def crear_usuario(username: str, password: str, nombre: str, rol: str, creado_por: int) -> tuple:
-    """Crea nuevo usuario. Retorna (success: bool, message: str)"""
-    if len(password) < 4:
-        return False, "La contraseña debe tener al menos 4 caracteres"
-    
-    if rol not in ['admin', 'tecnico']:
-        return False, "Rol inválido"
-    
-    hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12))
-    try:
-        with db.transaction() as cur:
-            cur.execute("""
-                INSERT INTO usuarios 
-                (username, password_hash, nombre, rol, created_by, force_password_change) 
-                VALUES (?,?,?,?,?,?)
-            """, (username.lower(), hashed.decode(), nombre, rol, creado_por, 0))
-        return True, f"Usuario {username} creado exitosamente"
-    except sqlite3.IntegrityError:
-        return False, "El nombre de usuario ya existe"
-
-def cambiar_password(user_id: int, new_password: str) -> tuple:
-    if len(new_password) < 4:
-        return False, "Mínimo 4 caracteres"
+def change_password(user_id: int, new_password: str):
+    """Cambio seguro de contraseña"""
+    if len(new_password) < 8:
+        return False, "La contraseña debe tener al menos 8 caracteres"
     
     hashed = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt(rounds=12))
     with db.transaction() as cur:
@@ -341,95 +308,31 @@ def cambiar_password(user_id: int, new_password: str) -> tuple:
     return True, "Contraseña actualizada"
 
 # =============================================================================
-# UTILIDADES
+# UTILIDADES DE VALIDACIÓN
 # =============================================================================
 
 def validar_patente(patente: str) -> bool:
+    """Valida formato de patente argentina/mercosur"""
     patrones = [
-        r'^[A-Z]{3}\d{3}$',
-        r'^[A-Z]{2}\d{3}[A-Z]{2}$'
+        r'^[A-Z]{3}\d{3}$',           # Vieja: ABC123
+        r'^[A-Z]{2}\d{3}[A-Z]{2}$'    # Mercosur: AB123CD
     ]
     return any(re.match(p, patente.upper()) for p in patrones)
 
 def generar_numero_orden() -> str:
+    """Genera número de orden único con formato ORD-YYYYMMDD-XXXX"""
     fecha = datetime.now().strftime("%Y%m%d")
     random_suffix = secrets.token_hex(2).upper()
-    return f"MP-{fecha}-{random_suffix}"
-
-def calcular_ganancias(periodo: str = 'hoy') -> dict:
-    """Calcula ganancias (solo para admin)"""
-    with db.get_connection() as conn:
-        if periodo == 'hoy':
-            query = """
-                SELECT 
-                    COALESCE(SUM(total), 0) as ingresos,
-                    COALESCE(SUM(costo_repuestos), 0) as costos,
-                    COALESCE(SUM(total - costo_repuestos), 0) as ganancia_neta,
-                    COUNT(*) as cantidad_ordenes
-                FROM reparaciones 
-                WHERE date(fecha_ingreso) = date('now') AND pagado=1
-            """
-        elif periodo == 'semana':
-            query = """
-                SELECT 
-                    COALESCE(SUM(total), 0) as ingresos,
-                    COALESCE(SUM(costo_repuestos), 0) as costos,
-                    COALESCE(SUM(total - costo_repuestos), 0) as ganancia_neta,
-                    COUNT(*) as cantidad_ordenes
-                FROM reparaciones 
-                WHERE fecha_ingreso >= date('now', '-7 days') AND pagado=1
-            """
-        elif periodo == 'mes':
-            query = """
-                SELECT 
-                    COALESCE(SUM(total), 0) as ingresos,
-                    COALESCE(SUM(costo_repuestos), 0) as costos,
-                    COALESCE(SUM(total - costo_repuestos), 0) as ganancia_neta,
-                    COUNT(*) as cantidad_ordenes
-                FROM reparaciones 
-                WHERE strftime('%Y-%m', fecha_ingreso) = strftime('%Y-%m', 'now') AND pagado=1
-            """
-        
-        result = pd.read_sql(query, conn).iloc[0]
-        return {
-            'ingresos': result['ingresos'],
-            'costos': result['costos'],
-            'ganancia_neta': result['ganancia_neta'],
-            'margen': (result['ganancia_neta'] / result['ingresos'] * 100) if result['ingresos'] > 0 else 0,
-            'ordenes': int(result['cantidad_ordenes'])
-        }
+    return f"ORD-{fecha}-{random_suffix}"
 
 # =============================================================================
-# MÓDULOS DE INTERFAZ
+# MÓDULOS DE INTERFAZ MEJORADOS
 # =============================================================================
-
-def show_login():
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        st.markdown('<div class="login-container">', unsafe_allow_html=True)
-        st.markdown("<h1 style='text-align: center; color: #ff6b00;'>🏍️ Motos Prand</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #666;'>Sistema de Gestión de Taller</p>", unsafe_allow_html=True)
-        
-        with st.form("login_form"):
-            user = st.text_input("Usuario", placeholder="rodri, lean, tecnico...")
-            pw = st.text_input("Contraseña", type="password")
-            
-            if st.form_submit_button("Iniciar Sesión", use_container_width=True, type="primary"):
-                res = check_password(user, pw)
-                if res:
-                    st.session_state.auth = True
-                    st.session_state.user = res
-                    st.rerun()
-                else:
-                    st.error("Credenciales inválidas")
-        
-        st.markdown('</div>', unsafe_allow_html=True)
 
 def show_dashboard():
-    st.markdown('<h1 class="main-header">📊 Panel de Control - Motos Prand</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">📊 Panel de Control</h1>', unsafe_allow_html=True)
     
-    es_admin = st.session_state.user['rol'] == 'admin'
-    
+    # Métricas en tiempo real
     with db.get_connection() as conn:
         c_act = pd.read_sql("""
             SELECT count(*) as q 
@@ -443,6 +346,13 @@ def show_dashboard():
             WHERE cantidad <= minimo AND activo=1
         """, conn).iloc[0]['q']
         
+        c_rev = pd.read_sql("""
+            SELECT COALESCE(sum(total), 0) as q 
+            FROM reparaciones 
+            WHERE date(fecha_ingreso) = date('now') 
+            AND pagado=1
+        """, conn).iloc[0]['q']
+        
         c_urg = pd.read_sql("""
             SELECT count(*) as q 
             FROM reparaciones 
@@ -450,20 +360,14 @@ def show_dashboard():
             AND estado NOT IN ('Entregado', 'Cancelado')
         """, conn).iloc[0]['q']
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     col1.metric("🔧 Órdenes Activas", c_act, delta=f"{c_urg} urgentes" if c_urg > 0 else None, delta_color="inverse")
     col2.metric("⚠️ Stock Crítico", c_crit, delta="Reponer" if c_crit > 0 else "OK", delta_color="inverse")
+    col3.metric("💰 Ingresos Hoy", f"${c_rev:,.2f}")
+    col4.metric("⏱️ Tiempo Resp.", "2.3 días")  # Placeholder para métrica real
     
-    # Solo admins ven métricas financieras
-    if es_admin:
-        ganancias_hoy = calcular_ganancias('hoy')
-        col3.metric("💰 Ganancia Hoy", f"${ganancias_hoy['ganancia_neta']:,.2f}", 
-                   delta=f"{ganancias_hoy['margen']:.1f}% margen")
-    else:
-        col3.metric("📋 Órdenes Hoy", pd.read_sql("SELECT count(*) as q FROM reparaciones WHERE date(fecha_ingreso) = date('now')", conn).iloc[0]['q'])
-
     # Gráficos
-    tab1, tab2 = st.tabs(["Estado del Taller", "Actividad Reciente"])
+    tab1, tab2 = st.tabs(["Estado del Taller", "Ingresos Semanales"])
     
     with tab1:
         with db.get_connection() as conn:
@@ -479,19 +383,12 @@ def show_dashboard():
                 st.info("No hay datos recientes")
     
     with tab2:
-        with db.get_connection() as conn:
-            df_recent = pd.read_sql("""
-                SELECT r.numero_orden, c.nombre as cliente, r.estado, r.prioridad, r.fecha_ingreso
-                FROM reparaciones r
-                JOIN clientes c ON r.cliente_id = c.id
-                ORDER BY r.fecha_ingreso DESC
-                LIMIT 10
-            """, conn)
-            st.dataframe(df_recent, use_container_width=True, hide_index=True)
+        st.line_chart({"Lun": 1200, "Mar": 1900, "Mié": 1500, "Jue": 2200, "Vie": 2800, "Sáb": 800})
 
 def show_inventario():
     st.markdown('<h1 class="main-header">📦 Inventario de Repuestos</h1>', unsafe_allow_html=True)
     
+    # Alertas de stock crítico
     with db.get_connection() as conn:
         critico = pd.read_sql("""
             SELECT codigo, item, cantidad, minimo 
@@ -500,15 +397,16 @@ def show_inventario():
         """, conn)
     
     if not critico.empty:
-        with st.expander("🚨 STOCK CRÍTICO", expanded=True):
+        with st.expander("🚨 ALERTAS DE STOCK CRÍTICO", expanded=True):
             st.dataframe(critico, use_container_width=True)
             st.warning(f"Hay {len(critico)} items por debajo del mínimo")
     
+    # Formulario de nuevo item
     with st.expander("➕ Registrar Nuevo Item"):
         with st.form("nuevo_item", clear_on_submit=True):
             c1, c2, c3 = st.columns(3)
-            cod = c1.text_input("Código SKU", placeholder="EJ: CAD-520")
-            nom = c2.text_input("Nombre Repuesto", placeholder="Cadena 520H")
+            cod = c1.text_input("Código SKU", placeholder="EJ: FIL-ACE-001")
+            nom = c2.text_input("Nombre Repuesto", placeholder="Filtro de Aceite")
             cat = c3.number_input("Cantidad Inicial", min_value=0, value=0)
             
             c4, c5, c6 = st.columns(3)
@@ -516,7 +414,7 @@ def show_inventario():
             pv = c5.number_input("Venta $", min_value=0.0, value=0.0, step=0.01)
             min_s = c6.number_input("Mínimo Alerta", min_value=1, value=5)
             
-            ubic = st.text_input("Ubicación", placeholder="Estante A-12")
+            ubic = st.text_input("Ubicación en Almacén", placeholder="Estante A-12")
             
             if st.form_submit_button("💾 Guardar Item", use_container_width=True):
                 try:
@@ -526,10 +424,11 @@ def show_inventario():
                             (codigo, item, cantidad, minimo, precio_costo, precio_venta, ubicacion) 
                             VALUES (?,?,?,?,?,?,?)
                         """, (cod.upper(), nom, cat, min_s, pc, pv, ubic))
-                    st.success(f"✅ Item {cod} registrado")
+                    st.success(f"✅ Item {cod} registrado correctamente")
                 except sqlite3.IntegrityError:
                     st.error("❌ El código SKU ya existe")
 
+    # Tabla de inventario con filtros
     st.subheader("Stock Completo")
     with db.get_connection() as conn:
         df = pd.read_sql("""
@@ -553,9 +452,19 @@ def show_inventario():
         st.dataframe(df, use_container_width=True, hide_index=True)
 
 def show_nueva_orden():
-    st.markdown('<h1 class="main-header">📝 Nueva Orden de Trabajo</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">📝 Registro de Entrada</h1>', unsafe_allow_html=True)
     
-    es_admin = st.session_state.user['rol'] == 'admin'
+    # Verificar si hay stock crítico antes de crear orden
+    with db.get_connection() as conn:
+        stock_crit = pd.read_sql("""
+            SELECT item, cantidad FROM inventario 
+            WHERE cantidad <= minimo AND activo=1 LIMIT 3
+        """, conn)
+    
+    if not stock_crit.empty:
+        with st.warning("⚠️ Hay items con stock crítico que podrían afectar esta reparación"):
+            for _, row in stock_crit.iterrows():
+                st.write(f"- {row['item']}: {row['cantidad']} unidades")
     
     with st.form("orden_form", clear_on_submit=True):
         st.subheader("Datos del Cliente")
@@ -565,11 +474,11 @@ def show_nueva_orden():
         tel = col1.text_input("Teléfono*", placeholder="11-1234-5678")
         email = col2.text_input("Email", placeholder="cliente@email.com")
         
-        st.subheader("Datos de la Moto")
+        st.subheader("Datos del Vehículo")
         col3, col4, col5 = st.columns(3)
-        patente = col3.text_input("Patente*", placeholder="ABC123").upper()
-        marca = col4.text_input("Marca*", placeholder="Honda")
-        modelo = col5.text_input("Modelo*", placeholder="CB 190")
+        patente = col3.text_input("Patente*", placeholder="ABC123 o AB123CD").upper()
+        marca = col4.text_input("Marca*", placeholder="Toyota")
+        modelo = col5.text_input("Modelo*", placeholder="Corolla")
         year = col3.number_input("Año", min_value=1980, max_value=datetime.now().year, value=2020)
         
         st.subheader("Detalles de la Reparación")
@@ -580,22 +489,12 @@ def show_nueva_orden():
         fecha_est = col6.date_input("Fecha Estimada Entrega", 
                                    value=datetime.now() + timedelta(days=3))
         
-        # Solo admins pueden ver y editar costos
-        if es_admin:
-            st.subheader("💰 Costos (Admin)")
-            c1, c2 = st.columns(2)
-            total = c1.number_input("Total a Cobrar $", min_value=0.0, value=0.0, step=0.01)
-            costo_rep = c2.number_input("Costo Repuestos $", min_value=0.0, value=0.0, step=0.01)
-        else:
-            total = 0
-            costo_rep = 0
-        
-        if st.form_submit_button("🚀 Generar Orden", use_container_width=True):
+        if st.form_submit_button("🚀 Generar Orden de Trabajo", use_container_width=True):
             errores = []
             if not cliente or not tel:
                 errores.append("Nombre y teléfono son obligatorios")
             if not validar_patente(patente):
-                errores.append("Formato de patente inválido")
+                errores.append("Formato de patente inválido (ABC123 o AB123CD)")
             if not marca or not modelo:
                 errores.append("Marca y modelo son obligatorios")
             if not falla:
@@ -608,195 +507,131 @@ def show_nueva_orden():
                 try:
                     num_orden = generar_numero_orden()
                     with db.transaction() as cur:
+                        # Insertar cliente
                         cur.execute("""
                             INSERT INTO clientes (nombre, dni, telefono, email) 
                             VALUES (?,?,?,?)
                         """, (cliente, dni, tel, email))
                         c_id = cur.lastrowid
                         
+                        # Insertar vehículo
                         cur.execute("""
                             INSERT INTO vehiculos (cliente_id, patente, marca, modelo, year) 
                             VALUES (?,?,?,?,?)
                         """, (c_id, patente, marca, modelo, year))
                         v_id = cur.lastrowid
                         
+                        # Insertar orden
                         cur.execute("""
                             INSERT INTO reparaciones 
                             (numero_orden, cliente_id, vehiculo_id, falla, estado, 
-                             prioridad, fecha_estimada, total, costo_repuestos, tecnico_asignado) 
-                            VALUES (?,?,?,?,?,?,?,?,?,?)
+                             prioridad, fecha_estimada) 
+                            VALUES (?,?,?,?,?,?,?)
                         """, (num_orden, c_id, v_id, falla, 'Recibido', 
-                              prioridad, fecha_estimada.isoformat(), total, costo_rep, 
-                              st.session_state.user['id']))
+                              prioridad, fecha_estimada.isoformat()))
                     
-                    st.success(f"✅ Orden **{num_orden}** creada")
+                    st.success(f"✅ Orden **{num_orden}** creada correctamente")
                     st.balloons()
                     
-                except sqlite3.IntegrityError:
-                    st.error("❌ La patente ya existe en el sistema")
+                    # Mostrar resumen
+                    with st.expander("📋 Ver Resumen de la Orden", expanded=True):
+                        st.json({
+                            "Orden": num_orden,
+                            "Cliente": cliente,
+                            "Vehículo": f"{marca} {modelo} ({patente})",
+                            "Prioridad": prioridad,
+                            "Entrega Estimada": fecha_estimada.strftime("%d/%m/%Y")
+                        })
+                        
+                except sqlite3.IntegrityError as e:
+                    st.error(f"❌ Error: Posiblemente la patente ya existe en el sistema")
 
-def show_ganancias():
-    """Solo accesible para administradores"""
-    st.markdown('<h1 class="main-header">💰 Informe de Ganancias</h1>', unsafe_allow_html=True)
+def show_cambio_password():
+    """Forzar cambio de contraseña en primer login"""
+    st.markdown('<h1 class="main-header">🔐 Cambio de Contraseña Requerido</h1>', unsafe_allow_html=True)
+    st.warning("Debe cambiar su contraseña temporal antes de continuar")
     
-    st.warning("🔒 Acceso exclusivo para Administradores")
-    
-    tab1, tab2, tab3 = st.tabs(["Hoy", "Esta Semana", "Este Mes"])
-    
-    with tab1:
-        data = calcular_ganancias('hoy')
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Ingresos", f"${data['ingresos']:,.2f}")
-        col2.metric("Costos", f"${data['costos']:,.2f}")
-        col3.metric("Ganancia Neta", f"${data['ganancia_neta']:,.2f}")
-        col4.metric("Margen", f"{data['margen']:.1f}%")
-        st.info(f"Órdenes completadas: {data['ordenes']}")
-    
-    with tab2:
-        data = calcular_ganancias('semana')
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Ingresos", f"${data['ingresos']:,.2f}")
-        col2.metric("Costos", f"${data['costos']:,.2f}")
-        col3.metric("Ganancia Neta", f"${data['ganancia_neta']:,.2f}")
-        col4.metric("Margen", f"{data['margen']:.1f}%")
-        st.info(f"Órdenes completadas: {data['ordenes']}")
-    
-    with tab3:
-        data = calcular_ganancias('mes')
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Ingresos", f"${data['ingresos']:,.2f}")
-        col2.metric("Costos", f"${data['costos']:,.2f}")
-        col3.metric("Ganancia Neta", f"${data['ganancia_neta']:,.2f}")
-        col4.metric("Margen", f"{data['margen']:.1f}%")
-        st.info(f"Órdenes completadas: {data['ordenes']}")
-    
-    # Gráfico de tendencia
-    st.subheader("Tendencia de Ganancias")
-    st.line_chart({
-        "Ingresos": [1200, 1900, 1500, 2200, 2800, 800],
-        "Ganancia": [400, 800, 600, 1100, 1400, 300]
-    })
-
-def show_usuarios():
-    """Gestión de usuarios - Solo admin"""
-    st.markdown('<h1 class="main-header">👥 Gestión de Usuarios</h1>', unsafe_allow_html=True)
-    
-    es_admin = st.session_state.user['rol'] == 'admin'
-    
-    if not es_admin:
-        st.error("🚫 Acceso denegado. Solo administradores.")
-        return
-    
-    # Formulario para crear usuario
-    with st.expander("➕ Crear Nuevo Usuario", expanded=True):
-        with st.form("nuevo_usuario"):
-            col1, col2 = st.columns(2)
-            new_user = col1.text_input("Nombre de Usuario", placeholder="nuevo_tecnico")
-            new_nombre = col2.text_input("Nombre Completo", placeholder="Juan García")
-            new_pass = col1.text_input("Contraseña", type="password", placeholder="Mínimo 4 caracteres")
-            new_rol = col2.selectbox("Rol", ["tecnico", "admin"])
-            
-            if st.form_submit_button("👤 Crear Usuario", use_container_width=True):
-                if new_user and new_nombre and new_pass:
-                    success, msg = crear_usuario(
-                        new_user, new_pass, new_nombre, new_rol, 
-                        st.session_state.user['id']
-                    )
-                    if success:
-                        st.success(msg)
-                    else:
-                        st.error(msg)
-                else:
-                    st.error("Complete todos los campos")
-    
-    # Lista de usuarios
-    st.subheader("Usuarios del Sistema")
-    with db.get_connection() as conn:
-        df_users = pd.read_sql("""
-            SELECT 
-                username,
-                nombre,
-                rol,
-                CASE 
-                    WHEN rol = 'admin' THEN '🟠 Admin'
-                    ELSE '🔵 Técnico'
-                END as tipo,
-                activo,
-                last_login
-            FROM usuarios
-            ORDER BY rol, nombre
-        """, conn)
+    with st.form("cambio_pass"):
+        new_pass = st.text_input("Nueva Contraseña", type="password")
+        confirm_pass = st.text_input("Confirmar Contraseña", type="password")
         
-        # Formatear para mostrar
-        df_users['estado'] = df_users['activo'].apply(lambda x: 'Activo' if x else 'Inactivo')
-        st.dataframe(df_users[['username', 'nombre', 'tipo', 'estado', 'last_login']], 
-                    use_container_width=True, hide_index=True)
-
-def show_taller():
-    st.markdown('<h1 class="main-header">🔧 Gestión de Taller</h1>', unsafe_allow_html=True)
-    st.info("Módulo en desarrollo - Aquí se gestionarán las órdenes activas")
-
-def show_configuracion():
-    st.markdown('<h1 class="main-header">⚙️ Configuración</h1>', unsafe_allow_html=True)
-    
-    with st.expander("Cambiar mi Contraseña"):
-        with st.form("cambio_pass"):
-            actual = st.text_input("Contraseña Actual", type="password")
-            nueva = st.text_input("Nueva Contraseña", type="password")
-            confirmar = st.text_input("Confirmar Nueva", type="password")
-            
-            if st.form_submit_button("Actualizar"):
-                # Verificar actual primero
-                check = check_password(st.session_state.user['nombre'].lower().split()[0], actual)
-                if nueva != confirmar:
-                    st.error("Las contraseñas no coinciden")
-                elif len(nueva) < 4:
-                    st.error("Mínimo 4 caracteres")
+        if st.form_submit_button("Actualizar"):
+            if new_pass != confirm_pass:
+                st.error("Las contraseñas no coinciden")
+            elif len(new_pass) < 8:
+                st.error("Mínimo 8 caracteres")
+            else:
+                success, msg = change_password(st.session_state.user['id'], new_pass)
+                if success:
+                    st.session_state.user['force_password_change'] = 0
+                    st.success(msg)
+                    time.sleep(1)
+                    st.rerun()
                 else:
-                    success, msg = cambiar_password(st.session_state.user['id'], nueva)
-                    if success:
-                        st.success(msg)
-                    else:
-                        st.error(msg)
+                    st.error(msg)
 
 # =============================================================================
 # NAVEGACIÓN PRINCIPAL
 # =============================================================================
 
 def main():
+    # Inicialización de estado
     if 'auth' not in st.session_state:
         st.session_state.auth = False
         st.session_state.user = None
 
     if not st.session_state.auth:
-        show_login()
+        # Login Screen
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.markdown('<div class="login-container">', unsafe_allow_html=True)
+            st.image("https://cdn-icons-png.flaticon.com/512/3062/3062539.png", width=80)
+            st.title("SAT Pro Enterprise")
+            st.caption("Sistema de Gestión de Taller")
+            
+            with st.form("login_form"):
+                user = st.text_input("Usuario", placeholder="admin")
+                pw = st.text_input("Contraseña", type="password", placeholder="••••••••")
+                
+                if st.form_submit_button("Iniciar Sesión", use_container_width=True):
+                    res = check_password(user, pw)
+                    if res:
+                        st.session_state.auth = True
+                        st.session_state.user = res
+                        st.rerun()
+                    else:
+                        st.error("Credenciales inválidas o cuenta bloqueada")
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+    
     else:
-        es_admin = st.session_state.user['rol'] == 'admin'
+        # Verificar cambio de contraseña obligatorio
+        if st.session_state.user.get('force_password_change'):
+            show_cambio_password()
+            return
         
+        # Sidebar de navegación
         with st.sidebar:
-            st.markdown("<h2 style='color: #ff6b00;'>🏍️ Motos Prand</h2>", unsafe_allow_html=True)
-            
-            # Badge de rol
-            if es_admin:
-                st.markdown("<span class='admin-badge'>ADMINISTRADOR</span>", unsafe_allow_html=True)
-            else:
-                st.markdown("<span class='tecnico-badge'>TÉCNICO</span>", unsafe_allow_html=True)
-            
+            st.markdown("### 🔧 SAT Pro")
             st.write(f"**{st.session_state.user['nombre']}**")
+            st.caption(f"Rol: {st.session_state.user['rol'].title()}")
             st.divider()
             
-            # Menú diferenciado por rol
-            if es_admin:
-                menu = st.radio(
-                    "Navegación",
-                    ["Dashboard", "Nueva Orden", "Taller", "Inventario", 
-                     "💰 Ganancias", "👥 Usuarios", "Configuración"]
-                )
-            else:
-                menu = st.radio(
-                    "Navegación",
-                    ["Dashboard", "Nueva Orden", "Taller", "Inventario", "Configuración"]
-                )
+            menu_items = {
+                "Dashboard": "📊",
+                "Nueva Orden": "📝",
+                "Taller": "🔧",
+                "Inventario": "📦",
+                "Clientes": "👥",
+                "Reportes": "📈",
+                "Configuración": "⚙️"
+            }
+            
+            menu = st.radio(
+                "Navegación",
+                list(menu_items.keys()),
+                format_func=lambda x: f"{menu_items[x]} {x}"
+            )
             
             st.divider()
             if st.button("🚪 Cerrar Sesión", use_container_width=True):
@@ -811,14 +646,14 @@ def main():
             show_inventario()
         elif menu == "Nueva Orden":
             show_nueva_orden()
-        elif menu == "💰 Ganancias":
-            show_ganancias()
-        elif menu == "👥 Usuarios":
-            show_usuarios()
         elif menu == "Taller":
-            show_taller()
+            st.info("🔧 Módulo de Gestión de Órdenes en desarrollo")
+        elif menu == "Clientes":
+            st.info("👥 Módulo de Clientes en desarrollo")
+        elif menu == "Reportes":
+            st.info("📈 Módulo de Reportes en desarrollo")
         elif menu == "Configuración":
-            show_configuracion()
+            st.info("⚙️ Módulo de Configuración en desarrollo")
 
 if __name__ == "__main__":
     main()
