@@ -269,7 +269,7 @@ class DatabaseManager:
                     activo BOOLEAN DEFAULT 1,
                     FOREIGN KEY(cliente_id) REFERENCES clientes(id),
                     FOREIGN KEY(vehiculo_id) REFERENCES vehiculos(id),
-                    FOREIGN KEY(tecnico_id) EXISTS usuarios(id)
+                    FOREIGN KEY(tecnico_id) REFERENCES usuarios(id)
                 );
                 
                 -- Clientes con historial
@@ -906,9 +906,9 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Instalar dependencias del sistema
-RUN apt-get update && apt-get install -y \
-    gcc \
-    libsqlite3-dev \
+RUN apt-get update && apt-get install -y \\
+    gcc \\
+    libsqlite3-dev \\
     && rm -rf /var/lib/apt/lists/*
 
 # Copiar requirements
@@ -1654,5 +1654,4 @@ def nueva_orden_module():
             
             st.balloons()
 
-def taller_module():
-    """Gest
+def taller
