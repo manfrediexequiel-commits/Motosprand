@@ -1,5 +1,5 @@
 [build]
-builder = "nixpacks"
+builder = "DOCKERFILE"
 
 [deploy]
 startCommand = "streamlit run motos_prand.py --server.port ${PORT} --server.address 0.0.0.0 --server.headless true"
