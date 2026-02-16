@@ -1636,7 +1636,6 @@ def nueva_orden_module():
                     del st.session_state[key]
             
             st.balloons()
-
 def taller_module():
     """Gestión de órdenes en taller"""
     st.markdown('<h1 class="main-header">🔧 Gestión de Taller</h1>', unsafe_allow_html=True)
@@ -2063,4 +2062,154 @@ def config_module():
         }
         
         for key, description in config_items.items():
+            value = getattr(config, key, 'No configurado')
+            masked = '✅ Configurado' if value and value not in ['', 'No configurado'] else '❌ No configurado'
+            st.write(f"**{description}:** {masked}")
         
+        st.caption("Estas configuraciones se establecen mediante variables de entorno o archivo .env")
+    
+    with tab3:
+        st.subheader("Gestión de Backups")
+        
+        # Listar backups existentes
+        backup_files = sorted([f for f in os.listdir(config.BACKUP_DIR) if f.endswith('.gz')], reverse=True)
+        
+        if backup_files:
+            st.write(f"**Backups disponibles:** {len(backup_files)}")
+            
+            for backup in backup_files[:10]:  # Mostrar últimos 10
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.write(backup)
+                with col2:
+                    backup_path = os.path.join(config.BACKUP_DIR, backup)
+                    with open(backup_path, 'rb') as f:
+                        st.download_button(
+                            "⬇️ Descargar",
+                            f.read(),
+                            file_name=backup,
+                            key=f"dl_{backup}"
+                        )
+        else:
+            st.info("No hay backups disponibles")
+        
+        if st.button("🔄 Forzar Backup Ahora", use_container_width=True):
+            backup_file = db.backup_database(automatic=False)
+            if backup_file:
+                st.success(f"✅ Backup creado: {os.path.basename(backup_file)}")
+                st.rerun()
+
+def clientes_module():
+    """Módulo de gestión de clientes"""
+    st.markdown('<h1 class="main-header">👥 Gestión de Clientes</h1>', unsafe_allow_html=True)
+    
+    # Búsqueda de clientes
+    busqueda_cliente = st.text_input("🔍 Buscar cliente por nombre, teléfono o DNI")
+    
+    query = """
+        SELECT c.*, 
+               COUNT(DISTINCT v.id) as total_vehiculos,
+               COUNT(DISTINCT r.id) as total_ordenes,
+               SUM(CASE WHEN r.estado = 'Entregado' THEN r.total ELSE 0 END) as total_gastado
+        FROM clientes c
+        LEFT JOIN vehiculos v ON c.id = v.cliente_id AND v.activo = 1
+        LEFT JOIN reparaciones r ON c.id = r.cliente_id AND r.activo = 1
+        WHERE c.activo = 1
+    """
+    params = []
+    
+    if busqueda_cliente:
+        query += " AND (c.nombre LIKE ? OR c.telefono LIKE ? OR c.dni_cuit LIKE ?)"
+        search_term = f"%{busqueda_cliente}%"
+        params.extend([search_term, search_term, search_term])
+    
+    query += " GROUP BY c.id ORDER BY c.nombre"
+    
+    with db.connection:
+        clientes = pd.read_sql_query(query, db.connection, params=params)
+    
+    if clientes.empty:
+        st.info("No se encontraron clientes")
+    else:
+        st.dataframe(
+            clientes,
+            column_config={
+                "total_gastado": st.column_config.NumberColumn("Total Gastado", format="$%.2f")
+            },
+            use_container_width=True,
+            height=400
+        )
+        
+        # Ver detalle de cliente
+        cliente_seleccionado = st.selectbox("Seleccionar cliente para ver detalle", 
+                                          clientes['nombre'].tolist() if not clientes.empty else [])
+        
+        if cliente_seleccionado:
+            cliente_id = clientes[clientes['nombre'] == cliente_seleccionado].iloc[0]['id']
+            
+            with db.connection:
+                # Vehículos del cliente
+                vehiculos = pd.read_sql_query("""
+                    SELECT * FROM vehiculos WHERE cliente_id = ? AND activo = 1
+                """, db.connection, params=(cliente_id,))
+                
+                # Historial de órdenes
+                ordenes = pd.read_sql_query("""
+                    SELECT r.*, v.patente 
+                    FROM reparaciones r
+                    LEFT JOIN vehiculos v ON r.vehiculo_id = v.id
+                    WHERE r.cliente_id = ? AND r.activo = 1
+                    ORDER BY r.fecha_ingreso DESC
+                """, db.connection, params=(cliente_id,))
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("🚗 Vehículos")
+                if not vehiculos.empty:
+                    st.dataframe(vehiculos[['patente', 'marca', 'modelo', 'anio']], use_container_width=True)
+                else:
+                    st.info("Sin vehículos registrados")
+            
+            with col2:
+                st.subheader("📋 Historial de Servicios")
+                if not ordenes.empty:
+                    st.dataframe(ordenes[['numero_orden', 'fecha_ingreso', 'estado', 'total']], use_container_width=True)
+                else:
+                    st.info("Sin órdenes registradas")
+
+# =============================================================================
+# MAIN APPLICATION
+# =============================================================================
+
+def main():
+    """Punto de entrada principal"""
+    
+    # Verificar autenticación
+    if "authenticated" not in st.session_state or not st.session_state["authenticated"]:
+        login_screen()
+        return
+    
+    # Menú lateral y routing
+    selected_module = sidebar_menu()
+    
+    # Routing de módulos
+    if selected_module == "dashboard":
+        dashboard_module()
+    elif selected_module == "inventario":
+        inventario_module()
+    elif selected_module == "clientes":
+        clientes_module()
+    elif selected_module == "nueva_orden":
+        nueva_orden_module()
+    elif selected_module == "taller":
+        taller_module()
+    elif selected_module == "facturacion":
+        facturacion_module()
+    elif selected_module == "reportes":
+        reportes_module()
+    elif selected_module == "config":
+        config_module()
+
+if __name__ == "__main__":
+    main()
+            
