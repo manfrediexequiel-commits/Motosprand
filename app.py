@@ -8,7 +8,6 @@ import os
 import json
 import smtplib
 import requests
-import subprocess
 import shutil
 from datetime import datetime, timedelta
 from difflib import get_close_matches
@@ -119,24 +118,6 @@ st.markdown("""
     .status-urgente { background: #f8d7da; color: #721c24; }
     .status-espera { background: #d1ecf1; color: #0c5460; }
     
-    .notification-toast {
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        background: white;
-        padding: 16px 24px;
-        border-radius: 12px;
-        box-shadow: 0 10px 40px rgba(0,0,0,0.15);
-        border-left: 4px solid #28a745;
-        z-index: 9999;
-        animation: slideIn 0.3s ease-out;
-    }
-    
-    @keyframes slideIn {
-        from { transform: translateX(100%); opacity: 0; }
-        to { transform: translateX(0); opacity: 1; }
-    }
-    
     .stButton>button {
         border-radius: 8px;
         font-weight: 500;
@@ -145,12 +126,6 @@ st.markdown("""
     .stButton>button:hover {
         transform: translateY(-2px);
         box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    }
-    
-    .data-grid {
-        border-radius: 12px;
-        overflow: hidden;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
     }
 </style>
 """, unsafe_allow_html=True)
@@ -198,7 +173,6 @@ class DatabaseManager:
     def init_database(self):
         """Inicialización completa del esquema"""
         with self.get_cursor() as cursor:
-            # Tablas principales mejoradas
             cursor.executescript("""
                 -- Inventario con tracking completo
                 CREATE TABLE IF NOT EXISTS inventario (
@@ -900,8 +874,7 @@ report_generator = ReportGenerator()
 def generate_docker_files():
     """Genera archivos Docker para deployment"""
     
-    dockerfile_content = """
-FROM python:3.11-slim
+    dockerfile_content = """FROM python:3.11-slim
 
 WORKDIR /app
 
@@ -928,11 +901,9 @@ EXPOSE 8501
 HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health || exit 1
 
 # Comando
-ENTRYPOINT ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
-"""
+ENTRYPOINT ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]"""
     
-    docker_compose_content = """
-version: '3.8'
+    docker_compose_content = """version: '3.8'
 
 services:
   satpro:
@@ -967,16 +938,28 @@ services:
 
 networks:
   satpro_network:
-    driver: bridge
-"""
+    driver: bridge"""
+    
+    requirements_content = """streamlit>=1.28.0
+pandas>=2.0.0
+fpdf>=1.7.2
+mercadopago>=2.2.0
+openpyxl>=3.1.0
+qrcode>=7.4.2
+Pillow>=10.0.0
+schedule>=1.2.0
+requests>=2.31.0"""
     
     with open('Dockerfile', 'w') as f:
         f.write(dockerfile_content)
     
     with open('docker-compose.yml', 'w') as f:
         f.write(docker_compose_content)
+        
+    with open('requirements.txt', 'w') as f:
+        f.write(requirements_content)
     
-    st.success("✅ Archivos Docker generados: `Dockerfile` y `docker-compose.yml`")
+    st.success("✅ Archivos Docker y requirements generados")
 
 # =============================================================================
 # UI COMPONENTS ENTERPRISE
@@ -1654,4 +1637,430 @@ def nueva_orden_module():
             
             st.balloons()
 
-def taller
+def taller_module():
+    """Gestión de órdenes en taller"""
+    st.markdown('<h1 class="main-header">🔧 Gestión de Taller</h1>', unsafe_allow_html=True)
+    
+    # Filtros
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        filtro_estado = st.multiselect("Estado", 
+            ['Recibido', 'Diagnóstico', 'Presupuestado', 'Aprobado', 
+             'Esperando repuestos', 'En reparación', 'Pruebas QC', 
+             'Listo para entrega', 'Entregado', 'Garantía', 'Cancelado'],
+            default=['Recibido', 'Diagnóstico', 'En reparación', 'Pruebas QC'])
+    with col2:
+        filtro_prioridad = st.multiselect("Prioridad", ['Baja', 'Normal', 'Alta', 'Urgente'], default=['Normal', 'Alta', 'Urgente'])
+    with col3:
+        busqueda = st.text_input("🔍 Buscar orden, cliente o patente")
+    
+    # Construir query dinámica
+    query = """
+        SELECT r.*, c.nombre as cliente_nombre, c.telefono as cliente_telefono,
+               v.patente, v.marca, v.modelo, v.anio
+        FROM reparaciones r
+        JOIN clientes c ON r.cliente_id = c.id
+        LEFT JOIN vehiculos v ON r.vehiculo_id = v.id
+        WHERE r.activo = 1
+    """
+    params = []
+    
+    if filtro_estado:
+        placeholders = ','.join(['?' for _ in filtro_estado])
+        query += f" AND r.estado IN ({placeholders})"
+        params.extend(filtro_estado)
+    
+    if filtro_prioridad:
+        placeholders = ','.join(['?' for _ in filtro_prioridad])
+        query += f" AND r.prioridad IN ({placeholders})"
+        params.extend(filtro_prioridad)
+    
+    if busqueda:
+        query += " AND (r.numero_orden LIKE ? OR c.nombre LIKE ? OR v.patente LIKE ?)"
+        search_term = f"%{busqueda}%"
+        params.extend([search_term, search_term, search_term])
+    
+    query += " ORDER BY CASE r.prioridad WHEN 'Urgente' THEN 1 WHEN 'Alta' THEN 2 WHEN 'Normal' THEN 3 ELSE 4 END, r.fecha_ingreso DESC"
+    
+    with db.connection:
+        ordenes = pd.read_sql_query(query, db.connection, params=params)
+    
+    if ordenes.empty:
+        st.info("No hay órdenes que coincidan con los filtros")
+        return
+    
+    # Mostrar órdenes en cards
+    for _, orden in ordenes.iterrows():
+        # Color según estado
+        color_estado = {
+            'Recibido': '#6c757d',
+            'Diagnóstico': '#17a2b8',
+            'Presupuestado': '#ffc107',
+            'Aprobado': '#28a745',
+            'Esperando repuestos': '#fd7e14',
+            'En reparación': '#007bff',
+            'Pruebas QC': '#6f42c1',
+            'Listo para entrega': '#20c997',
+            'Entregado': '#28a745',
+            'Garantía': '#e83e8c',
+            'Cancelado': '#dc3545'
+        }.get(orden['estado'], '#6c757d')
+        
+        with st.expander(f"#{orden['numero_orden']} | {orden['patente']} | {orden['cliente_nombre']} | {orden['estado']}", expanded=False):
+            col_info, col_acciones = st.columns([3, 1])
+            
+            with col_info:
+                st.markdown(f"""
+                <div style="border-left: 4px solid {color_estado}; padding-left: 15px;">
+                    <h4>{orden['marca']} {orden['modelo']} ({orden['anio']})</h4>
+                    <p><strong>Cliente:</strong> {orden['cliente_nombre']} | 📱 {orden['cliente_telefono']}</p>
+                    <p><strong>Falla:</strong> {orden['falla']}</p>
+                    <p><strong>Diagnóstico:</strong> {orden['diagnostico'] or 'Pendiente'}</p>
+                    <p><strong>Presupuesto:</strong> ${orden['total']:,.2f}</p>
+                    <p><strong>Ingreso:</strong> {orden['fecha_ingreso']} | <strong>Estimada:</strong> {orden['fecha_estimada']}</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Historial de estados
+                with db.connection:
+                    historial = pd.read_sql_query("""
+                        SELECT he.*, u.nombre_completo as usuario_nombre
+                        FROM historial_estados he
+                        LEFT JOIN usuarios u ON he.usuario_id = u.id
+                        WHERE he.id_reparacion = ?
+                        ORDER BY he.fecha DESC
+                    """, db.connection, params=(orden['id'],))
+                
+                if not historial.empty:
+                    with st.expander("📋 Historial de cambios"):
+                        for _, hist in historial.iterrows():
+                            st.caption(f"{hist['fecha']}: {hist['estado_anterior'] or 'Inicio'} → {hist['estado_nuevo']} por {hist['usuario_nombre']}")
+            
+            with col_acciones:
+                st.subheader("Acciones")
+                
+                # Cambiar estado
+                nuevo_estado = st.selectbox(
+                    "Nuevo estado",
+                    ['Recibido', 'Diagnóstico', 'Presupuestado', 'Aprobado', 
+                     'Esperando repuestos', 'En reparación', 'Pruebas QC', 
+                     'Listo para entrega', 'Entregado', 'Garantía', 'Cancelado'],
+                    index=['Recibido', 'Diagnóstico', 'Presupuestado', 'Aprobado', 
+                           'Esperando repuestos', 'En reparación', 'Pruebas QC', 
+                           'Listo para entrega', 'Entregado', 'Garantía', 'Cancelado'].index(orden['estado']) if orden['estado'] in ['Recibido', 'Diagnóstico', 'Presupuestado', 'Aprobado', 'Esperando repuestos', 'En reparación', 'Pruebas QC', 'Listo para entrega', 'Entregado', 'Garantía', 'Cancelado'] else 0,
+                    key=f"estado_{orden['id']}"
+                )
+                
+                nota_cambio = st.text_area("Nota del cambio", key=f"nota_{orden['id']}", height=80)
+                
+                if st.button("🔄 Actualizar Estado", key=f"btn_update_{orden['id']}", use_container_width=True):
+                    with db.get_cursor() as cursor:
+                        # Actualizar estado
+                        cursor.execute("""
+                            UPDATE reparaciones 
+                            SET estado = ?, fecha_finalizacion = CASE WHEN ? = 'Entregado' THEN CURRENT_TIMESTAMP ELSE fecha_finalizacion END
+                            WHERE id = ?
+                        """, (nuevo_estado, nuevo_estado, orden['id']))
+                        
+                        # Registrar en historial
+                        cursor.execute("""
+                            INSERT INTO historial_estados (id_reparacion, estado_anterior, estado_nuevo, usuario_id, nota_cambio, ip_address)
+                            VALUES (?, ?, ?, ?, ?, ?)
+                        """, (orden['id'], orden['estado'], nuevo_estado, st.session_state['user']['id'], nota_cambio, '127.0.0.1'))
+                    
+                    # Notificar al cliente
+                    cliente_data = {
+                        'nombre': orden['cliente_nombre'],
+                        'email': None,  # Podrías cargar el email real
+                        'telefono': orden['cliente_telefono']
+                    }
+                    notification_manager.notify_status_change(orden['id'], nuevo_estado, cliente_data)
+                    
+                    st.success(f"✅ Estado actualizado a {nuevo_estado}")
+                    st.rerun()
+                
+                # Acciones adicionales según estado
+                if orden['estado'] == 'Listo para entrega':
+                    if st.button("💰 Procesar Pago", key=f"pago_{orden['id']}", use_container_width=True, type="primary"):
+                        st.session_state['orden_pago_id'] = orden['id']
+                        st.rerun()
+                
+                if orden['estado'] == 'Entregado' and not orden['pagado']:
+                    st.warning("⚠️ Pendiente de pago")
+                
+                # Ver detalles completos
+                with st.expander("🔍 Ver detalles completos"):
+                    st.json(orden.to_dict())
+
+def facturacion_module():
+    """Módulo de facturación y pagos"""
+    st.markdown('<h1 class="main-header">💰 Facturación y Pagos</h1>', unsafe_allow_html=True)
+    
+    # Órdenes listas para facturar
+    with db.connection:
+        ordenes_pendientes = pd.read_sql_query("""
+            SELECT r.*, c.nombre as cliente_nombre, c.email as cliente_email, c.telefono as cliente_telefono,
+                   v.patente, v.marca, v.modelo
+            FROM reparaciones r
+            JOIN clientes c ON r.cliente_id = c.id
+            LEFT JOIN vehiculos v ON r.vehiculo_id = v.id
+            WHERE r.estado = 'Listo para entrega' AND r.pagado = 0 AND r.activo = 1
+            ORDER BY r.fecha_ingreso
+        """, db.connection)
+    
+    if ordenes_pendientes.empty:
+        st.success("✅ No hay órdenes pendientes de facturación")
+    else:
+        st.subheader(f"📋 Órdenes Listas para Entrega ({len(ordenes_pendientes)})")
+        
+        for _, orden in ordenes_pendientes.iterrows():
+            with st.container():
+                col1, col2, col3 = st.columns([2, 2, 1])
+                
+                with col1:
+                    st.write(f"**#{orden['numero_orden']}**")
+                    st.write(f"{orden['cliente_nombre']}")
+                    st.caption(f"{orden['marca']} {orden['modelo']} - {orden['patente']}")
+                
+                with col2:
+                    st.write(f"**Total: ${orden['total']:,.2f}**")
+                    st.caption(f"Mano de obra: ${orden['mano_obra']:,.2f}")
+                
+                with col3:
+                    if st.button("💳 Cobrar", key=f"cobrar_{orden['id']}", use_container_width=True):
+                        st.session_state['orden_cobro_id'] = orden['id']
+                        st.rerun()
+                
+                st.divider()
+    
+    # Proceso de cobro
+    if 'orden_cobro_id' in st.session_state:
+        orden_id = st.session_state['orden_cobro_id']
+        
+        with db.connection:
+            orden = pd.read_sql_query("""
+                SELECT r.*, c.nombre as cliente_nombre, c.email as cliente_email
+                FROM reparaciones r
+                JOIN clientes c ON r.cliente_id = c.id
+                WHERE r.id = ?
+            """, db.connection, params=(orden_id,)).iloc[0]
+        
+        st.subheader("💳 Procesar Cobro")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write(f"**Orden:** #{orden['numero_orden']}")
+            st.write(f"**Cliente:** {orden['cliente_nombre']}")
+            st.write(f"**Total:** ${orden['total']:,.2f}")
+        
+        with col2:
+            metodo_pago = st.selectbox("Método de pago", 
+                ['efectivo', 'tarjeta', 'transferencia', 'mercadopago', 'cheque', 'cuenta_corriente'])
+            
+            if metodo_pago == 'mercadopago':
+                if st.button("🔗 Generar Link de Pago MercadoPago", use_container_width=True):
+                    items = [{
+                        'descripcion': f'Servicio Taller - Orden {orden["numero_orden"]}',
+                        'cantidad': 1,
+                        'precio': float(orden['total'])
+                    }]
+                    cliente = {
+                        'nombre': orden['cliente_nombre'],
+                        'email': orden['cliente_email'],
+                        'telefono': ''
+                    }
+                    link = payment_manager.create_preference(orden_id, items, cliente)
+                    if link:
+                        st.success("✅ Link generado")
+                        st.markdown(f"[**Click aquí para pagar**]({link})")
+                        st.code(link)
+        
+        descuento = st.number_input("Descuento ($)", min_value=0.0, max_value=float(orden['total']), value=0.0, step=50.0)
+        total_final = orden['total'] - descuento
+        
+        st.write(f"**Total con descuento:** ${total_final:,.2f}")
+        
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            if st.button("✅ Confirmar Cobro", use_container_width=True, type="primary"):
+                with db.get_cursor() as cursor:
+                    # Registrar pago
+                    cursor.execute("""
+                        INSERT INTO pagos (orden_id, monto, metodo, referencia, estado)
+                        VALUES (?, ?, ?, ?, 'completado')
+                    """, (orden_id, total_final, metodo_pago, f'PAGO-{datetime.now().strftime("%Y%m%d%H%M%S")}'))
+                    
+                    # Marcar orden como pagada
+                    cursor.execute("""
+                        UPDATE reparaciones 
+                        SET pagado = 1, metodo_pago = ?, descuento_monto = ?, total = ?
+                        WHERE id = ?
+                    """, (metodo_pago, descuento, total_final, orden_id))
+                
+                st.success("✅ Cobro registrado correctamente")
+                del st.session_state['orden_cobro_id']
+                st.rerun()
+        
+        with col_btn2:
+            if st.button("❌ Cancelar", use_container_width=True):
+                del st.session_state['orden_cobro_id']
+                st.rerun()
+
+def reportes_module():
+    """Módulo de reportes y estadísticas"""
+    st.markdown('<h1 class="main-header">📈 Reportes y Estadísticas</h1>', unsafe_allow_html=True)
+    
+    tab1, tab2, tab3 = st.tabs(["📊 Reportes de Ventas", "📦 Reportes de Inventario", "👥 Reportes de Clientes"])
+    
+    with tab1:
+        st.subheader("Reportes de Ventas")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            fecha_desde = st.date_input("Desde", value=datetime.now() - timedelta(days=30))
+        with col2:
+            fecha_hasta = st.date_input("Hasta", value=datetime.now())
+        
+        if st.button("📥 Generar Reporte de Órdenes", use_container_width=True):
+            excel_file = report_generator.generate_excel_report("ordenes", fecha_desde, fecha_hasta)
+            st.download_button(
+                "⬇️ Descargar Excel",
+                excel_file,
+                file_name=f"Reporte_Ordenes_{fecha_desde.strftime('%Y%m%d')}_{fecha_hasta.strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        
+        # Estadísticas rápidas
+        with db.connection:
+            stats = pd.read_sql_query("""
+                SELECT 
+                    COUNT(*) as total_ordenes,
+                    SUM(CASE WHEN estado = 'Entregado' THEN 1 ELSE 0 END) as completadas,
+                    SUM(CASE WHEN estado = 'Entregado' THEN total ELSE 0 END) as ingresos,
+                    AVG(CASE WHEN estado = 'Entregado' THEN total ELSE NULL END) as ticket_promedio
+                FROM reparaciones
+                WHERE DATE(fecha_ingreso) BETWEEN ? AND ?
+            """, db.connection, params=(fecha_desde.strftime('%Y-%m-%d'), fecha_hasta.strftime('%Y-%m-%d')))
+        
+        col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
+        with col_stat1:
+            st.metric("Total Órdenes", int(stats.iloc[0]['total_ordenes']))
+        with col_stat2:
+            st.metric("Completadas", int(stats.iloc[0]['completadas']))
+        with col_stat3:
+            st.metric("Ingresos", f"${stats.iloc[0]['ingresos'] or 0:,.2f}")
+        with col_stat4:
+            st.metric("Ticket Promedio", f"${stats.iloc[0]['ticket_promedio'] or 0:,.2f}")
+    
+    with tab2:
+        st.subheader("Reportes de Inventario")
+        
+        if st.button("📥 Generar Reporte de Inventario Actual", use_container_width=True):
+            excel_file = report_generator.generate_excel_report("inventario", datetime.now() - timedelta(days=365), datetime.now())
+            st.download_button(
+                "⬇️ Descargar Excel",
+                excel_file,
+                file_name=f"Inventario_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        
+        # Movimientos de inventario
+        with db.connection:
+            movimientos = pd.read_sql_query("""
+                SELECT 
+                    i.item,
+                    i.categoria,
+                    SUM(hc.cantidad) as total_vendido,
+                    SUM(hc.precio_venta * hc.cantidad) as ingresos,
+                    AVG(hc.margen) as margen_promedio
+                FROM historial_consumo hc
+                JOIN inventario i ON hc.id_repuesto = i.id
+                WHERE hc.fecha >= DATE('now', '-30 days')
+                GROUP BY i.id
+                ORDER BY total_vendido DESC
+                LIMIT 20
+            """, db.connection)
+        
+        if not movimientos.empty:
+            st.write("**Top 20 repuestos más vendidos (últimos 30 días)**")
+            st.dataframe(movimientos, use_container_width=True)
+    
+    with tab3:
+        st.subheader("Reportes de Clientes")
+        
+        with db.connection:
+            top_clientes = pd.read_sql_query("""
+                SELECT 
+                    c.nombre,
+                    c.telefono,
+                    COUNT(r.id) as total_ordenes,
+                    SUM(r.total) as total_gastado,
+                    MAX(r.fecha_ingreso) as ultima_visita
+                FROM clientes c
+                LEFT JOIN reparaciones r ON c.id = r.cliente_id
+                WHERE r.estado = 'Entregado'
+                GROUP BY c.id
+                ORDER BY total_gastado DESC
+                LIMIT 20
+            """, db.connection)
+        
+        if not top_clientes.empty:
+            st.write("**Top 20 clientes por gasto**")
+            st.dataframe(top_clientes, use_container_width=True)
+
+def config_module():
+    """Módulo de configuración del sistema"""
+    st.markdown('<h1 class="main-header">⚙️ Configuración</h1>', unsafe_allow_html=True)
+    
+    tab1, tab2, tab3 = st.tabs(["👥 Gestión de Usuarios", "🏢 Configuración General", "💾 Backups"])
+    
+    with tab1:
+        st.subheader("Gestión de Usuarios")
+        
+        # Listar usuarios
+        with db.connection:
+            usuarios = pd.read_sql_query("""
+                SELECT id, username, nombre_completo, email, rol, activo, ultimo_acceso
+                FROM usuarios
+                ORDER BY created_at DESC
+            """, db.connection)
+        
+        st.dataframe(usuarios, use_container_width=True)
+        
+        # Crear nuevo usuario
+        with st.expander("➕ Crear Nuevo Usuario"):
+            with st.form("nuevo_usuario"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    new_username = st.text_input("Usuario *")
+                    new_password = st.text_input("Contraseña *", type="password")
+                    new_nombre = st.text_input("Nombre Completo *")
+                with col2:
+                    new_email = st.text_input("Email *")
+                    new_rol = st.selectbox("Rol", ['admin', 'supervisor', 'tecnico', 'recepcion'])
+                
+                if st.form_submit_button("💾 Crear Usuario"):
+                    if all([new_username, new_password, new_nombre, new_email]):
+                        if auth_manager.create_user(new_username, new_password, new_nombre, new_email, new_rol):
+                            st.success(f"✅ Usuario {new_username} creado correctamente")
+                            st.rerun()
+                        else:
+                            st.error("❌ El usuario o email ya existe")
+                    else:
+                        st.error("Complete todos los campos obligatorios")
+    
+    with tab2:
+        st.subheader("Configuración General")
+        
+        st.info("🔧 Configure las variables de entorno para personalizar el sistema:")
+        
+        config_items = {
+            'SMTP_SERVER': 'Servidor de correo SMTP',
+            'SMTP_USER': 'Usuario SMTP',
+            'MP_ACCESS_TOKEN': 'Token de MercadoPago',
+            'WHATSAPP_API_KEY': 'API Key de WhatsApp Business',
+            'SESSION_TIMEOUT': 'Tiempo de sesión (minutos)'
+        }
+        
+        for key, description in config_items.items():
+        
