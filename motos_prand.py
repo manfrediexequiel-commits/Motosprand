@@ -823,3 +823,12 @@ def main():
 if __name__ == "__main__":
     main()
                 
+def _crear_usuario_inicial(self, cur, username, password, nombre, rol):
+    """Crea usuario inicial si no existe"""
+    hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12))
+    cur.execute("""
+        INSERT OR IGNORE INTO usuarios 
+        (username, password_hash, nombre, rol, force_password_change) 
+        VALUES (?,?,?,?,?)
+    """, (username, hashed.decode(), nombre, rol, 0))
+    
