@@ -23,12 +23,18 @@ import base64
 # CONFIGURACIÓN INICIAL - MOTOS PRAND
 # =============================================================================
 
+import os
+
+# Configuración del puerto para Railway
+port = int(os.environ.get("PORT", 8501))
+
 st.set_page_config(
     page_title="Motos Prand - Gestión de Taller",
     page_icon="🏍️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
 
 @dataclass
 class Config:
