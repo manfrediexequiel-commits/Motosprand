@@ -30,6 +30,9 @@ Sistema de gestión para taller mecánico de motos con control de inventario, ó
 - Python 3.9+
 
 ### Pasos
+git add .
+git commit -m "Fix build errors"
+git push origin main
 
 1. **Clonar el repositorio**
 ```bash
