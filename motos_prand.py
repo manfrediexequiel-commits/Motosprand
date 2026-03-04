@@ -29,7 +29,7 @@ import os
 port = int(os.environ.get("PORT", 8501))
 
 st.set_page_config(
-    page_title="Motos Prand - Gestión de Taller",
+    page_title="Motos Taller - Gestión de Taller",
     page_icon="🏍️",
     layout="wide",
     initial_sidebar_state="expanded"
