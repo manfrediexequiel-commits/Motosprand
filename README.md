@@ -20,10 +20,10 @@ Sistema completo de gestión para taller mecánico de motos, con control de inve
 
 | Usuario | Contraseña | Rol | Acceso |
 |---------|-----------|-----|--------|
-| **rodri** | 1590 | 🟠 Admin | Total |
-| **lean** | 3588 | 🟠 Admin | Total |
-| **tecnico** | 9911 | 🔵 Técnico | Limitado |
-| **tecnico1** | 8822 | 🔵 Técnico | Limitado |
+| **rodri** | **** | 🟠 Admin | Total |
+| **lean** |****  | 🟠 Admin | Total |
+| **tecnico** | *** | 🔵 Técnico | Limitado |
+| **tecnico1** | ****| 🔵 Técnico | Limitado |
 
 > **Nota:** Los técnicos no pueden ver ganancias ni crear usuarios.
 
